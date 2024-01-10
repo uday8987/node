@@ -942,8 +942,13 @@ void ClassType::GenerateSliceAccessor(size_t field_index) {
 
   Macro* macro = Declarations::DeclareMacro(macro_name, true, base::nullopt,
                                             signature, block, base::nullopt);
-  GlobalContext::EnsureInCCOutputList(TorqueMacro::cast(macro),
-                                      macro->Position().source);
+  if (this->ShouldGenerateCppObjectLayoutDefinitionAsserts()) {
+    GlobalContext::EnsureInCCDebugOutputList(TorqueMacro::cast(macro),
+                                             macro->Position().source);
+  } else {
+    GlobalContext::EnsureInCCOutputList(TorqueMacro::cast(macro),
+                                        macro->Position().source);
+  }
 }
 
 bool ClassType::HasStaticSize() const {
@@ -1245,7 +1250,7 @@ base::Optional<std::tuple<size_t, std::string>> SizeOf(const Type* type) {
     size_string = "kExternalPointerSlotSize";
   } else if (type->IsSubtypeOf(TypeOracle::GetIndirectPointerType())) {
     size = TargetArchitecture::IndirectPointerSize();
-    size_string = "kIndirectPointerSlotSize";
+    size_string = "kIndirectPointerSize";
   } else if (type->IsSubtypeOf(TypeOracle::GetVoidType())) {
     size = 0;
     size_string = "0";

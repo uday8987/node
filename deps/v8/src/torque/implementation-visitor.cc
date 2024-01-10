@@ -77,9 +77,14 @@ const Type* ImplementationVisitor::Visit(Statement* stmt) {
 
 void ImplementationVisitor::BeginGeneratedFiles() {
   std::set<SourceId> contains_class_definitions;
+  std::set<SourceId> contains_class_asserts;
   for (const ClassType* type : TypeOracle::GetClasses()) {
     if (type->ShouldGenerateCppClassDefinitions()) {
       contains_class_definitions.insert(type->AttributedToFile());
+    }
+    if (type->ShouldGenerateCppObjectDefinitionAsserts() ||
+        type->ShouldGenerateCppObjectLayoutDefinitionAsserts()) {
+      contains_class_asserts.insert(type->AttributedToFile());
     }
   }
 
@@ -92,6 +97,7 @@ void ImplementationVisitor::BeginGeneratedFiles() {
       for (const std::string& include_path : GlobalContext::CppIncludes()) {
         file << "#include " << StringLiteralQuote(include_path) << "\n";
       }
+      file << "#include \"src/codegen/code-stub-assembler-inl.h\"\n";
 
       file << "// Required Builtins:\n";
       file << "#include \"torque-generated/" +
@@ -131,6 +137,11 @@ void ImplementationVisitor::BeginGeneratedFiles() {
              << "-inl.h\"\n\n";
         file << "#include \"torque-generated/class-verifiers.h\"\n";
         file << "#include \"src/objects/instance-type-inl.h\"\n\n";
+      }
+      if (contains_class_asserts.count(source) != 0) {
+        file << "#include \""
+             << SourceFileMap::PathFromV8RootWithoutExtension(source)
+             << ".h\"\n\n";
       }
 
       streams.class_definition_cc.BeginNamespace("v8", "internal");
@@ -306,7 +317,7 @@ VisitResult ImplementationVisitor::InlineMacro(
   }
 
   size_t count = 0;
-  for (auto arg : arguments) {
+  for (const auto& arg : arguments) {
     if (this_reference && count == signature.implicit_count) count++;
     const bool mark_as_used = signature.implicit_count > count;
     const Identifier* name = macro->parameter_names()[count++];
@@ -1535,7 +1546,7 @@ VisitResult ImplementationVisitor::GenerateArrayLength(VisitResult object,
   const ClassType* class_type = *object.type()->ClassSupertype();
   std::map<std::string, LocalValue> bindings;
   bool before_current = true;
-  for (Field f : class_type->ComputeAllFields()) {
+  for (const Field& f : class_type->ComputeAllFields()) {
     if (field.name_and_type.name == f.name_and_type.name) {
       before_current = false;
     }
@@ -1567,7 +1578,7 @@ VisitResult ImplementationVisitor::GenerateArrayLength(
 
   StackScope stack_scope(this);
   std::map<std::string, LocalValue> bindings;
-  for (Field f : class_type->ComputeAllFields()) {
+  for (const Field& f : class_type->ComputeAllFields()) {
     if (f.index) break;
     const std::string& fieldname = f.name_and_type.name;
     VisitResult value = initializer_results.field_value_map.at(fieldname);
@@ -2804,7 +2815,7 @@ VisitResult ImplementationVisitor::GenerateCall(
     ++current;
   }
 
-  for (auto arg : arguments.parameters) {
+  for (const auto& arg : arguments.parameters) {
     const Type* to_type = (current >= callable->signature().types().size())
                               ? TypeOracle::GetObjectType()
                               : callable->signature().types()[current++];
@@ -2912,7 +2923,7 @@ VisitResult ImplementationVisitor::GenerateCall(
           break;
         }
       }
-      for (VisitResult arg : converted_arguments) {
+      for (const VisitResult& arg : converted_arguments) {
         DCHECK(!arg.IsOnStack());
         if (!first) {
           result << ", ";
@@ -2924,6 +2935,7 @@ VisitResult ImplementationVisitor::GenerateCall(
       return VisitResult(return_type, result.str());
     } else if (inline_macro) {
       std::vector<Block*> label_blocks;
+      label_blocks.reserve(arguments.labels.size());
       for (Binding<LocalLabel>* label : arguments.labels) {
         label_blocks.push_back(label->block);
       }
@@ -3136,7 +3148,7 @@ VisitResult ImplementationVisitor::GenerateCall(
       std::vector<std::string> constexpr_arguments_for_getter;
 
       size_t arg_count = 0;
-      for (auto arg : arguments_to_getter.parameters) {
+      for (const auto& arg : arguments_to_getter.parameters) {
         DCHECK_LT(arg_count, getter->signature().types().size());
         const Type* to_type = getter->signature().types()[arg_count++];
         AddCallParameter(getter, arg, to_type, &converted_arguments_for_getter,
@@ -3504,13 +3516,17 @@ void ImplementationVisitor::VisitAllDeclarables() {
   // Do the same for macros which generate C++ debug code.
   // The set of macros is the same as C++ macros.
   output_type_ = OutputType::kCCDebug;
-  for (size_t i = 0; i < cc_macros.size(); ++i) {
+  const std::vector<std::pair<TorqueMacro*, SourceId>>& cc_debug_macros =
+      GlobalContext::AllMacrosForCCDebugOutput();
+  for (size_t i = 0; i < cc_debug_macros.size(); ++i) {
     try {
-      Visit(static_cast<Declarable*>(cc_macros[i].first), cc_macros[i].second);
+      Visit(static_cast<Declarable*>(cc_debug_macros[i].first),
+            cc_debug_macros[i].second);
     } catch (TorqueAbortCompilation&) {
       // Recover from compile errors here. The error is recorded already.
     }
   }
+
   output_type_ = OutputType::kCSA;
 }
 
@@ -3951,12 +3967,11 @@ class ClassFieldOffsetGenerator : public FieldOffsetsGenerator {
  public:
   ClassFieldOffsetGenerator(std::ostream& header, std::ostream& inline_header,
                             const ClassType* type, std::string gen_name,
-                            const ClassType* parent)
+                            const ClassType* parent, bool use_templates = true)
       : FieldOffsetsGenerator(type),
         hdr_(header),
         inl_(inline_header),
-        previous_field_end_((parent && parent->IsShape()) ? "P::kSize"
-                                                          : "P::kHeaderSize"),
+        previous_field_end_(FirstFieldStart(type, parent, use_templates)),
         gen_name_(gen_name) {}
 
   void WriteField(const Field& f, const std::string& size_string) override {
@@ -3996,6 +4011,28 @@ class ClassFieldOffsetGenerator : public FieldOffsetsGenerator {
   }
 
  private:
+  static std::string FirstFieldStart(const ClassType* type,
+                                     const ClassType* parent,
+                                     bool use_templates = true) {
+    std::string parent_name = use_templates ? "P" : parent->name();
+
+    if (type->IsLayoutDefinedInCpp()) {
+      // TODO(leszeks): Hacked in support for some classes (e.g.
+      // HeapObject) being mirrored by a *Layout class. Remove once
+      // everything is ported to layout classes.
+      if (parent_name == "PrimitiveHeapObject" || parent_name == "HeapObject") {
+        parent_name += "Layout";
+      }
+
+      return "sizeof(" + parent_name + ")";
+    }
+
+    if (parent && parent->IsShape()) {
+      return parent_name + "::kSize";
+    }
+    return parent_name + "::kHeaderSize";
+  }
+
   std::ostream& hdr_;
   std::ostream& inl_;
   std::string previous_field_end_;
@@ -4021,6 +4058,7 @@ class CppClassGenerator {
 
   void GenerateClass();
   void GenerateCppObjectDefinitionAsserts();
+  void GenerateCppObjectLayoutDefinitionAsserts();
 
  private:
   SourcePosition Position();
@@ -4155,7 +4193,7 @@ void CppClassGenerator::GenerateClass() {
   hdr_ << "\n";
   ClassFieldOffsetGenerator g(hdr_, inl_, type_, gen_name_,
                               type_->GetSuperClass());
-  for (auto f : type_->fields()) {
+  for (const auto& f : type_->fields()) {
     CurrentSourcePosition::Scope scope(f.pos);
     g.RecordOffsetFor(f);
   }
@@ -4226,7 +4264,7 @@ void CppClassGenerator::GenerateClass() {
       allocated_size_f.PrintInlineDefinition(hdr_, [&](std::ostream& stream) {
         stream << "    return SizeFor(";
         bool first = true;
-        for (auto field : *index_fields) {
+        for (const auto& field : *index_fields) {
           if (!first) stream << ", ";
           stream << "this->" << field.name_and_type.name << "()";
           first = false;
@@ -4265,32 +4303,60 @@ void CppClassGenerator::GenerateClass() {
 }
 
 void CppClassGenerator::GenerateCppObjectDefinitionAsserts() {
-  hdr_ << "// Definition " << Position() << "\n"
-       << template_decl() << "\n"
-       << "class " << gen_name_ << "Asserts {\n";
+  impl_ << "// Definition " << Position() << "\n"
+        << "class " << gen_name_ << "Asserts {\n";
 
-  ClassFieldOffsetGenerator g(hdr_, inl_, type_, gen_name_,
-                              type_->GetSuperClass());
+  ClassFieldOffsetGenerator g(impl_, impl_, type_, gen_name_,
+                              type_->GetSuperClass(), false);
+  for (const auto& f : type_->fields()) {
+    CurrentSourcePosition::Scope scope(f.pos);
+    g.RecordOffsetFor(f);
+  }
+  g.Finish();
+  impl_ << "\n";
+
+  for (const auto& f : type_->fields()) {
+    std::string field_offset =
+        "k" + CamelifyString(f.name_and_type.name) + "Offset";
+    impl_ << "  static_assert(" << field_offset << " == " << name_
+          << "::" << field_offset << ",\n"
+          << "                \"Values of " << name_ << "::" << field_offset
+          << " defined in Torque and C++ do not match\");\n";
+  }
+  if (!type_->IsAbstract() && type_->HasStaticSize()) {
+    impl_ << "  static_assert(kSize == " << name_ << "::kSize);\n";
+  }
+
+  impl_ << "};\n\n";
+}
+
+void CppClassGenerator::GenerateCppObjectLayoutDefinitionAsserts() {
+  impl_ << "// Definition " << Position() << "\n"
+        << "class " << gen_name_ << "Asserts {\n";
+
+  ClassFieldOffsetGenerator g(impl_, impl_, type_, gen_name_,
+                              type_->GetSuperClass(), false);
   for (auto f : type_->fields()) {
     CurrentSourcePosition::Scope scope(f.pos);
     g.RecordOffsetFor(f);
   }
   g.Finish();
-  hdr_ << "\n";
+  impl_ << "\n";
 
   for (auto f : type_->fields()) {
     std::string field_offset =
         "k" + CamelifyString(f.name_and_type.name) + "Offset";
-    hdr_ << "  static_assert(" << field_offset << " == D::" << field_offset
-         << ",\n"
-         << "                \"Values of " << name_ << "::" << field_offset
-         << " defined in Torque and C++ do not match\");\n";
+    impl_ << "  static_assert(" << field_offset
+          << " == offsetof(" + name_ + ", " << f.name_and_type.name << "_),\n"
+          << "                \"Value of " << name_ << "::" << field_offset
+          << " defined in Torque and offset of field " << name_
+          << "::" << f.name_and_type.name << " in C++ do not match\");\n";
   }
   if (!type_->IsAbstract() && type_->HasStaticSize()) {
-    hdr_ << "  static_assert(kSize == D::kSize);\n";
+    impl_ << "  static_assert(kSize == sizeof(" + name_ + "));\n";
   }
 
-  hdr_ << "};\n\n";
+  impl_ << "};\n\n";
 }
 
 void CppClassGenerator::GenerateClassCasts() {
@@ -4758,6 +4824,9 @@ void ImplementationVisitor::GenerateClassDefinitions(
       } else if (type->ShouldGenerateCppObjectDefinitionAsserts()) {
         CppClassGenerator g(type, header, inline_header, implementation);
         g.GenerateCppObjectDefinitionAsserts();
+      } else if (type->ShouldGenerateCppObjectLayoutDefinitionAsserts()) {
+        CppClassGenerator g(type, header, inline_header, implementation);
+        g.GenerateCppObjectLayoutDefinitionAsserts();
       }
       for (const Field& f : type->fields()) {
         const Type* field_type = f.name_and_type.type;
@@ -4796,7 +4865,7 @@ void ImplementationVisitor::GenerateClassDefinitions(
         bool first = true;
         auto index_fields = GetOrderedUniqueIndexFields(*type);
         CHECK(index_fields.has_value());
-        for (auto index_field : *index_fields) {
+        for (const auto& index_field : *index_fields) {
           if (!first) {
             factory_impl << ", ";
           }
@@ -5291,7 +5360,7 @@ void ImplementationVisitor::GenerateClassVerifiers(
       cc_contents << "  CHECK(Is" << name << "(o, isolate));\n";
 
       // Third, verify its properties.
-      for (auto f : type->fields()) {
+      for (const auto& f : type->fields()) {
         GenerateClassFieldVerifier(name, *type, f, h_contents, cc_contents);
       }
 

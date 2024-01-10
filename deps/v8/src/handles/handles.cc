@@ -38,8 +38,12 @@ ASSERT_TRIVIALLY_COPYABLE(MaybeHandle<Object>);
 
 #ifdef V8_ENABLE_DIRECT_HANDLE
 
+#if !(defined(DEBUG) && V8_HAS_ATTRIBUTE_TRIVIAL_ABI)
+// Direct handles should be trivially copyable, except in debug builds where we
+// can check that they are stack-allocated.
 ASSERT_TRIVIALLY_COPYABLE(DirectHandle<Object>);
 ASSERT_TRIVIALLY_COPYABLE(MaybeDirectHandle<Object>);
+#endif
 
 #endif  // V8_ENABLE_DIRECT_HANDLE
 
@@ -61,7 +65,7 @@ bool HandleBase::IsDereferenceAllowed() const {
   if (!AllowHandleDereference::IsAllowed()) return false;
 
   // Allocations in the shared heap may be dereferenced by multiple threads.
-  if (heap_object.InWritableSharedSpace()) return true;
+  if (InWritableSharedSpace(heap_object)) return true;
 
   // Deref is explicitly allowed from any thread. Used for running internal GC
   // epilogue callbacks in the safepoint after a GC.
@@ -94,7 +98,6 @@ bool HandleBase::IsDereferenceAllowed() const {
 }
 
 #ifdef V8_ENABLE_DIRECT_HANDLE
-
 bool DirectHandleBase::IsDereferenceAllowed() const {
   DCHECK_NE(obj_, kTaggedNullAddress);
   Tagged<Object> object(obj_);
@@ -105,7 +108,11 @@ bool DirectHandleBase::IsDereferenceAllowed() const {
   if (!AllowHandleDereference::IsAllowed()) return false;
 
   // Allocations in the shared heap may be dereferenced by multiple threads.
-  if (heap_object.InWritableSharedSpace()) return true;
+  if (InWritableSharedSpace(heap_object)) return true;
+
+  // Deref is explicitly allowed from any thread. Used for running internal GC
+  // epilogue callbacks in the safepoint after a GC.
+  if (AllowHandleDereferenceAllThreads::IsAllowed()) return true;
 
   LocalHeap* local_heap = isolate->CurrentLocalHeap();
 
@@ -123,14 +130,6 @@ bool DirectHandleBase::IsDereferenceAllowed() const {
 
   return true;
 }
-
-void DirectHandleBase::VerifyOnStackAndMainThread() const {
-  internal::HandleHelper::VerifyOnStack(this);
-  // The following verifies that we are on the main thread, as
-  // LocalHeap::Current is not set in that case.
-  DCHECK_NULL(LocalHeap::Current());
-}
-
 #endif  // V8_ENABLE_DIRECT_HANDLE
 
 #endif  // DEBUG

@@ -401,6 +401,7 @@ void VisitFloatUnop(InstructionSelectorT<Adapter>* selector,
   }
 }
 
+#if V8_ENABLE_WEBASSEMBLY
 void VisitRRSimd(InstructionSelectorT<TurboshaftAdapter>* selector,
                  turboshaft::OpIndex node, ArchOpcode avx_opcode,
                  ArchOpcode sse_opcode) {
@@ -554,6 +555,8 @@ void VisitI8x16Shift(InstructionSelectorT<TurbofanAdapter>* selector,
     selector->Emit(opcode, output, operand0, operand1, arraysize(temps), temps);
   }
 }
+#endif  // V8_ENABLE_WEBASSEMBLY
+
 }  // namespace
 
 template <typename Adapter>
@@ -580,6 +583,7 @@ void InstructionSelectorT<Adapter>::VisitAbortCSADcheck(node_t node) {
   }
 }
 
+#if V8_ENABLE_WEBASSEMBLY
 template <>
 void InstructionSelectorT<TurboshaftAdapter>::VisitLoadLane(node_t node) {
   UNIMPLEMENTED();
@@ -698,6 +702,7 @@ void InstructionSelectorT<TurbofanAdapter>::VisitLoadTransform(Node* node) {
   InstructionCode code = opcode | AddressingModeField::encode(mode);
   Emit(code, 1, outputs, input_count, inputs);
 }
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 template <typename Adapter>
 void InstructionSelectorT<Adapter>::VisitLoad(node_t node, node_t value,
@@ -885,6 +890,7 @@ void InstructionSelectorT<Adapter>::VisitProtectedStore(node_t node) {
   UNIMPLEMENTED();
 }
 
+#if V8_ENABLE_WEBASSEMBLY
 template <>
 void InstructionSelectorT<TurboshaftAdapter>::VisitStoreLane(node_t node) {
   UNIMPLEMENTED();
@@ -925,6 +931,7 @@ void InstructionSelectorT<TurbofanAdapter>::VisitStoreLane(Node* node) {
   DCHECK_GE(4, input_count);
   Emit(opcode, 0, nullptr, input_count, inputs);
 }
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 // Architecture supports unaligned access, therefore VisitLoad is used instead
 template <typename Adapter>
@@ -1393,7 +1400,7 @@ void InstructionSelectorT<Adapter>::VisitWord32Ror(node_t node) {
   V(Word32Popcnt, kIA32Popcnt)                               \
   V(SignExtendWord8ToInt32, kIA32Movsxbl)                    \
   V(SignExtendWord16ToInt32, kIA32Movsxwl)                   \
-  V(F64x2Sqrt, kIA32F64x2Sqrt)
+  IF_WASM(V, F64x2Sqrt, kIA32F64x2Sqrt)
 
 #define RO_WITH_TEMP_OP_T_LIST(V) V(ChangeUint32ToFloat64, kIA32Uint32ToFloat64)
 
@@ -1414,42 +1421,44 @@ void InstructionSelectorT<Adapter>::VisitWord32Ror(node_t node) {
   V(Float64RoundTiesEven,                                                      \
     kIA32Float64Round | MiscField::encode(kRoundToNearest))                    \
   V(TruncateFloat64ToWord32, kArchTruncateDoubleToI)                           \
-  V(F32x4Ceil, kIA32F32x4Round | MiscField::encode(kRoundUp))                  \
-  V(F32x4Floor, kIA32F32x4Round | MiscField::encode(kRoundDown))               \
-  V(F32x4Trunc, kIA32F32x4Round | MiscField::encode(kRoundToZero))             \
-  V(F32x4NearestInt, kIA32F32x4Round | MiscField::encode(kRoundToNearest))     \
-  V(F64x2Ceil, kIA32F64x2Round | MiscField::encode(kRoundUp))                  \
-  V(F64x2Floor, kIA32F64x2Round | MiscField::encode(kRoundDown))               \
-  V(F64x2Trunc, kIA32F64x2Round | MiscField::encode(kRoundToZero))             \
-  V(F64x2NearestInt, kIA32F64x2Round | MiscField::encode(kRoundToNearest))
+  IF_WASM(V, F32x4Ceil, kIA32F32x4Round | MiscField::encode(kRoundUp))         \
+  IF_WASM(V, F32x4Floor, kIA32F32x4Round | MiscField::encode(kRoundDown))      \
+  IF_WASM(V, F32x4Trunc, kIA32F32x4Round | MiscField::encode(kRoundToZero))    \
+  IF_WASM(V, F32x4NearestInt,                                                  \
+          kIA32F32x4Round | MiscField::encode(kRoundToNearest))                \
+  IF_WASM(V, F64x2Ceil, kIA32F64x2Round | MiscField::encode(kRoundUp))         \
+  IF_WASM(V, F64x2Floor, kIA32F64x2Round | MiscField::encode(kRoundDown))      \
+  IF_WASM(V, F64x2Trunc, kIA32F64x2Round | MiscField::encode(kRoundToZero))    \
+  IF_WASM(V, F64x2NearestInt,                                                  \
+          kIA32F64x2Round | MiscField::encode(kRoundToNearest))
 
-#define RRO_FLOAT_OP_T_LIST(V) \
-  V(Float32Add, kFloat32Add)   \
-  V(Float64Add, kFloat64Add)   \
-  V(Float32Sub, kFloat32Sub)   \
-  V(Float64Sub, kFloat64Sub)   \
-  V(Float32Mul, kFloat32Mul)   \
-  V(Float64Mul, kFloat64Mul)   \
-  V(Float32Div, kFloat32Div)   \
-  V(Float64Div, kFloat64Div)   \
-  V(F64x2Add, kIA32F64x2Add)   \
-  V(F64x2Sub, kIA32F64x2Sub)   \
-  V(F64x2Mul, kIA32F64x2Mul)   \
-  V(F64x2Div, kIA32F64x2Div)   \
-  V(F64x2Eq, kIA32F64x2Eq)     \
-  V(F64x2Ne, kIA32F64x2Ne)     \
-  V(F64x2Lt, kIA32F64x2Lt)     \
-  V(F64x2Le, kIA32F64x2Le)
+#define RRO_FLOAT_OP_T_LIST(V)        \
+  V(Float32Add, kFloat32Add)          \
+  V(Float64Add, kFloat64Add)          \
+  V(Float32Sub, kFloat32Sub)          \
+  V(Float64Sub, kFloat64Sub)          \
+  V(Float32Mul, kFloat32Mul)          \
+  V(Float64Mul, kFloat64Mul)          \
+  V(Float32Div, kFloat32Div)          \
+  V(Float64Div, kFloat64Div)          \
+  IF_WASM(V, F64x2Add, kIA32F64x2Add) \
+  IF_WASM(V, F64x2Sub, kIA32F64x2Sub) \
+  IF_WASM(V, F64x2Mul, kIA32F64x2Mul) \
+  IF_WASM(V, F64x2Div, kIA32F64x2Div) \
+  IF_WASM(V, F64x2Eq, kIA32F64x2Eq)   \
+  IF_WASM(V, F64x2Ne, kIA32F64x2Ne)   \
+  IF_WASM(V, F64x2Lt, kIA32F64x2Lt)   \
+  IF_WASM(V, F64x2Le, kIA32F64x2Le)
 
-#define FLOAT_UNOP_T_LIST(V) \
-  V(Float32Abs, kFloat32Abs) \
-  V(Float64Abs, kFloat64Abs) \
-  V(Float32Neg, kFloat32Neg) \
-  V(Float64Neg, kFloat64Neg) \
-  V(F32x4Abs, kFloat32Abs)   \
-  V(F32x4Neg, kFloat32Neg)   \
-  V(F64x2Abs, kFloat64Abs)   \
-  V(F64x2Neg, kFloat64Neg)
+#define FLOAT_UNOP_T_LIST(V)        \
+  V(Float32Abs, kFloat32Abs)        \
+  V(Float64Abs, kFloat64Abs)        \
+  V(Float32Neg, kFloat32Neg)        \
+  V(Float64Neg, kFloat64Neg)        \
+  IF_WASM(V, F32x4Abs, kFloat32Abs) \
+  IF_WASM(V, F32x4Neg, kFloat32Neg) \
+  IF_WASM(V, F64x2Abs, kFloat64Abs) \
+  IF_WASM(V, F64x2Neg, kFloat64Neg)
 
 #define RO_VISITOR(Name, opcode)                                 \
   template <typename Adapter>                                    \
@@ -2081,10 +2090,14 @@ void VisitAtomicBinOp(InstructionSelectorT<Adapter>* selector, Node* node,
                  arraysize(temp), temp);
 }
 
-template <typename Adapter>
-void VisitPairAtomicBinOp(InstructionSelectorT<Adapter>* selector, Node* node,
-                          ArchOpcode opcode) {
-  IA32OperandGeneratorT<Adapter> g(selector);
+void VisitPairAtomicBinOp(InstructionSelectorT<TurboshaftAdapter>* selector,
+                          turboshaft::OpIndex node, ArchOpcode opcode) {
+  UNIMPLEMENTED();
+}
+
+void VisitPairAtomicBinOp(InstructionSelectorT<TurbofanAdapter>* selector,
+                          Node* node, ArchOpcode opcode) {
+  IA32OperandGeneratorT<TurbofanAdapter> g(selector);
   Node* base = node->InputAt(0);
   Node* index = node->InputAt(1);
   Node* value = node->InputAt(2);
@@ -2448,20 +2461,25 @@ void InstructionSelectorT<Adapter>::VisitMemoryBarrier(node_t node) {
 }
 
 template <typename Adapter>
-void InstructionSelectorT<Adapter>::VisitWord32AtomicLoad(Node* node) {
-  AtomicLoadParameters atomic_load_params = AtomicLoadParametersOf(node->op());
-  LoadRepresentation load_rep = atomic_load_params.representation();
-  DCHECK(load_rep.representation() == MachineRepresentation::kWord8 ||
-         load_rep.representation() == MachineRepresentation::kWord16 ||
-         load_rep.representation() == MachineRepresentation::kWord32 ||
-         load_rep.representation() == MachineRepresentation::kTaggedSigned ||
-         load_rep.representation() == MachineRepresentation::kTaggedPointer ||
-         load_rep.representation() == MachineRepresentation::kTagged);
-  USE(load_rep);
-  // The memory order is ignored as both acquire and sequentially consistent
-  // loads can emit MOV.
-  // https://www.cl.cam.ac.uk/~pes20/cpp/cpp0xmappings.html
-  VisitLoad(node, node, GetLoadOpcode(load_rep));
+void InstructionSelectorT<Adapter>::VisitWord32AtomicLoad(node_t node) {
+  if constexpr (Adapter::IsTurboshaft) {
+    UNIMPLEMENTED();
+  } else {
+    AtomicLoadParameters atomic_load_params =
+        AtomicLoadParametersOf(node->op());
+    LoadRepresentation load_rep = atomic_load_params.representation();
+    DCHECK(load_rep.representation() == MachineRepresentation::kWord8 ||
+           load_rep.representation() == MachineRepresentation::kWord16 ||
+           load_rep.representation() == MachineRepresentation::kWord32 ||
+           load_rep.representation() == MachineRepresentation::kTaggedSigned ||
+           load_rep.representation() == MachineRepresentation::kTaggedPointer ||
+           load_rep.representation() == MachineRepresentation::kTagged);
+    USE(load_rep);
+    // The memory order is ignored as both acquire and sequentially consistent
+    // loads can emit MOV.
+    // https://www.cl.cam.ac.uk/~pes20/cpp/cpp0xmappings.html
+    VisitLoad(node, node, GetLoadOpcode(load_rep));
+  }
 }
 
 template <typename Adapter>
@@ -2590,8 +2608,14 @@ VISIT_ATOMIC_BINOP(Or)
 VISIT_ATOMIC_BINOP(Xor)
 #undef VISIT_ATOMIC_BINOP
 
+template <>
+void InstructionSelectorT<TurboshaftAdapter>::VisitWord32AtomicPairLoad(
+    node_t node) {
+  UNIMPLEMENTED();
+}
+
 template <typename Adapter>
-void InstructionSelectorT<Adapter>::VisitWord32AtomicPairLoad(Node* node) {
+void InstructionSelectorT<Adapter>::VisitWord32AtomicPairLoad(node_t node) {
   // Both acquire and sequentially consistent loads can emit MOV.
   // https://www.cl.cam.ac.uk/~pes20/cpp/cpp0xmappings.html
   IA32OperandGeneratorT<Adapter> g(this);
@@ -2627,8 +2651,14 @@ void InstructionSelectorT<Adapter>::VisitWord32AtomicPairLoad(Node* node) {
   }
 }
 
+template <>
+void InstructionSelectorT<TurboshaftAdapter>::VisitWord32AtomicPairStore(
+    node_t node) {
+  UNIMPLEMENTED();
+}
+
 template <typename Adapter>
-void InstructionSelectorT<Adapter>::VisitWord32AtomicPairStore(Node* node) {
+void InstructionSelectorT<Adapter>::VisitWord32AtomicPairStore(node_t node) {
   // Release pair stores emit a MOVQ via a double register, and sequentially
   // consistent stores emit CMPXCHG8B.
   // https://www.cl.cam.ac.uk/~pes20/cpp/cpp0xmappings.html
@@ -2671,38 +2701,44 @@ void InstructionSelectorT<Adapter>::VisitWord32AtomicPairStore(Node* node) {
 }
 
 template <typename Adapter>
-void InstructionSelectorT<Adapter>::VisitWord32AtomicPairAdd(Node* node) {
+void InstructionSelectorT<Adapter>::VisitWord32AtomicPairAdd(node_t node) {
   VisitPairAtomicBinOp(this, node, kIA32Word32AtomicPairAdd);
 }
 
 template <typename Adapter>
-void InstructionSelectorT<Adapter>::VisitWord32AtomicPairSub(Node* node) {
+void InstructionSelectorT<Adapter>::VisitWord32AtomicPairSub(node_t node) {
   VisitPairAtomicBinOp(this, node, kIA32Word32AtomicPairSub);
 }
 
 template <typename Adapter>
-void InstructionSelectorT<Adapter>::VisitWord32AtomicPairAnd(Node* node) {
+void InstructionSelectorT<Adapter>::VisitWord32AtomicPairAnd(node_t node) {
   VisitPairAtomicBinOp(this, node, kIA32Word32AtomicPairAnd);
 }
 
 template <typename Adapter>
-void InstructionSelectorT<Adapter>::VisitWord32AtomicPairOr(Node* node) {
+void InstructionSelectorT<Adapter>::VisitWord32AtomicPairOr(node_t node) {
   VisitPairAtomicBinOp(this, node, kIA32Word32AtomicPairOr);
 }
 
 template <typename Adapter>
-void InstructionSelectorT<Adapter>::VisitWord32AtomicPairXor(Node* node) {
+void InstructionSelectorT<Adapter>::VisitWord32AtomicPairXor(node_t node) {
   VisitPairAtomicBinOp(this, node, kIA32Word32AtomicPairXor);
 }
 
 template <typename Adapter>
-void InstructionSelectorT<Adapter>::VisitWord32AtomicPairExchange(Node* node) {
+void InstructionSelectorT<Adapter>::VisitWord32AtomicPairExchange(node_t node) {
   VisitPairAtomicBinOp(this, node, kIA32Word32AtomicPairExchange);
+}
+
+template <>
+void InstructionSelectorT<
+    TurboshaftAdapter>::VisitWord32AtomicPairCompareExchange(node_t node) {
+  UNIMPLEMENTED();
 }
 
 template <typename Adapter>
 void InstructionSelectorT<Adapter>::VisitWord32AtomicPairCompareExchange(
-    Node* node) {
+    node_t node) {
   IA32OperandGeneratorT<Adapter> g(this);
   Node* index = node->InputAt(1);
   AddressingMode addressing_mode;
@@ -2880,6 +2916,7 @@ void InstructionSelectorT<Adapter>::VisitWord32AtomicPairCompareExchange(
   V(I16x8ShrS)                               \
   V(I16x8ShrU)
 
+#if V8_ENABLE_WEBASSEMBLY
 template <>
 void InstructionSelectorT<TurboshaftAdapter>::VisitS128Const(node_t node) {
   UNIMPLEMENTED();
@@ -3119,7 +3156,8 @@ template <>
 void InstructionSelectorT<TurbofanAdapter>::VisitI32x4UConvertF32x4(
     Node* node) {
   IA32OperandGeneratorT<TurbofanAdapter> g(this);
-  InstructionOperand temps[] = {g.TempSimd128Register()};
+  InstructionOperand temps[] = {g.TempSimd128Register(),
+                                g.TempSimd128Register()};
   InstructionCode opcode =
       IsSupported(AVX) ? kAVXI32x4UConvertF32x4 : kSSEI32x4UConvertF32x4;
   Emit(opcode, g.DefineSameAsFirst(node), g.UseRegister(node->InputAt(0)),
@@ -3387,6 +3425,7 @@ template <typename Adapter>
 void InstructionSelectorT<Adapter>::VisitI8x16ShrU(node_t node) {
   VisitI8x16Shift(this, node, kIA32I8x16ShrU);
 }
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 template <typename Adapter>
 void InstructionSelectorT<Adapter>::VisitInt32AbsWithOverflow(node_t node) {
@@ -3546,7 +3585,10 @@ template <>
 void InstructionSelectorT<TurbofanAdapter>::VisitI8x16Shuffle(Node* node) {
   uint8_t shuffle[kSimd128Size];
   bool is_swizzle;
-  CanonicalizeShuffle(node, shuffle, &is_swizzle);
+  // TODO(nicohartmann@): Properly use view here once Turboshaft support is
+  // implemented.
+  auto view = this->simd_shuffle_view(node);
+  CanonicalizeShuffle(view, shuffle, &is_swizzle);
 
   int imm_count = 0;
   static const int kMaxImms = 6;
@@ -3580,7 +3622,7 @@ void InstructionSelectorT<TurbofanAdapter>::VisitI8x16Shuffle(Node* node) {
       imms[imm_count++] = shuffle_mask;
     } else {
       // Swap inputs from the normal order for (v)palignr.
-      SwapShuffleInputs(node);
+      SwapShuffleInputs(view);
       is_swizzle = false;  // It's simpler to just handle the general case.
       no_same_as_first = use_avx;  // SSE requires same-as-first.
       opcode = kIA32S8x16Alignr;
@@ -3725,25 +3767,19 @@ void InstructionSelectorT<TurbofanAdapter>::VisitI8x16Swizzle(Node* node) {
        g.UseRegister(node->InputAt(0)), g.UseRegister(node->InputAt(1)),
        arraysize(temps), temps);
 }
-#else
+
 template <>
-void InstructionSelectorT<TurboshaftAdapter>::VisitI8x16Shuffle(node_t node) {
-  UNREACHABLE();
-}
-template <>
-void InstructionSelectorT<TurbofanAdapter>::VisitI8x16Shuffle(Node* node) {
-  UNREACHABLE();
+void InstructionSelectorT<TurbofanAdapter>::VisitSetStackPointer(Node* node) {
+  OperandGenerator g(this);
+  auto input = g.UseAny(node->InputAt(0));
+  Emit(kArchSetStackPointer, 0, nullptr, 1, &input);
 }
 
 template <>
-void InstructionSelectorT<TurboshaftAdapter>::VisitI8x16Swizzle(node_t node) {
-  UNREACHABLE();
+void InstructionSelectorT<TurboshaftAdapter>::VisitSetStackPointer(
+    node_t node) {
+  UNIMPLEMENTED();
 }
-template <>
-void InstructionSelectorT<TurbofanAdapter>::VisitI8x16Swizzle(Node* node) {
-  UNREACHABLE();
-}
-#endif  // V8_ENABLE_WEBASSEMBLY
 
 namespace {
 void VisitMinOrMax(InstructionSelectorT<TurboshaftAdapter>* selector,
@@ -3950,7 +3986,17 @@ void InstructionSelectorT<Adapter>::VisitI32x4RelaxedTruncF32x4S(node_t node) {
 
 template <typename Adapter>
 void InstructionSelectorT<Adapter>::VisitI32x4RelaxedTruncF32x4U(node_t node) {
-  VisitFloatUnop(this, node, this->input_at(node, 0), kIA32I32x4TruncF32x4U);
+  IA32OperandGeneratorT<Adapter> g(this);
+  node_t input = this->input_at(node, 0);
+  InstructionOperand temps[] = {g.TempSimd128Register()};
+  // No need for unique because inputs are float but temp is general.
+  if (IsSupported(AVX)) {
+    Emit(kIA32I32x4TruncF32x4U, g.DefineAsRegister(node), g.UseRegister(input),
+         arraysize(temps), temps);
+  } else {
+    Emit(kIA32I32x4TruncF32x4U, g.DefineSameAsFirst(node), g.UseRegister(input),
+         arraysize(temps), temps);
+  }
 }
 
 template <>
@@ -4117,6 +4163,7 @@ void InstructionSelectorT<Adapter>::VisitI32x4DotI8x16I7x16AddS(node_t node) {
          g.UseUniqueRegister(node->InputAt(2)), arraysize(temps), temps);
   }
 }
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 template <typename Adapter>
 void InstructionSelectorT<Adapter>::AddOutputToSelectContinuation(

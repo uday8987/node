@@ -1751,8 +1751,9 @@ static void TestReconfigureElementsKind_GeneralizeFieldInPlace(
   Expectations expectations(isolate, PACKED_SMI_ELEMENTS);
 
   // Create a map, add required properties to it and initialize expectations.
-  Handle<Map> initial_map = isolate->factory()->NewMap(
-      JS_ARRAY_TYPE, JSArray::kHeaderSize, PACKED_SMI_ELEMENTS);
+  Handle<Map> initial_map =
+      isolate->factory()->NewContextfulMapForCurrentContext(
+          JS_ARRAY_TYPE, JSArray::kHeaderSize, PACKED_SMI_ELEMENTS);
   initial_map->SetConstructor(*isolate->object_function());
 
   Handle<Map> map = initial_map;
@@ -2781,13 +2782,13 @@ TEST(HoleyHeapNumber) {
   Isolate* isolate = CcTest::i_isolate();
 
   auto mhn = isolate->factory()->NewHeapNumberWithHoleNaN();
-  CHECK_EQ(kHoleNanInt64, mhn->value_as_bits(kRelaxedLoad));
+  CHECK_EQ(kHoleNanInt64, mhn->value_as_bits());
 
   mhn = isolate->factory()->NewHeapNumber(0.0);
-  CHECK_EQ(uint64_t{0}, mhn->value_as_bits(kRelaxedLoad));
+  CHECK_EQ(uint64_t{0}, mhn->value_as_bits());
 
-  mhn->set_value_as_bits(kHoleNanInt64, kRelaxedStore);
-  CHECK_EQ(kHoleNanInt64, mhn->value_as_bits(kRelaxedLoad));
+  mhn->set_value_as_bits(kHoleNanInt64);
+  CHECK_EQ(kHoleNanInt64, mhn->value_as_bits());
 
   // Ensure that new storage for uninitialized value or mutable heap number
   // with uninitialized sentinel (kHoleNanInt64) is a mutable heap number
@@ -2796,11 +2797,11 @@ TEST(HoleyHeapNumber) {
       Object::NewStorageFor(isolate, isolate->factory()->uninitialized_value(),
                             Representation::Double());
   CHECK(IsHeapNumber(*obj));
-  CHECK_EQ(kHoleNanInt64, HeapNumber::cast(*obj)->value_as_bits(kRelaxedLoad));
+  CHECK_EQ(kHoleNanInt64, HeapNumber::cast(*obj)->value_as_bits());
 
   obj = Object::NewStorageFor(isolate, mhn, Representation::Double());
   CHECK(IsHeapNumber(*obj));
-  CHECK_EQ(kHoleNanInt64, HeapNumber::cast(*obj)->value_as_bits(kRelaxedLoad));
+  CHECK_EQ(kHoleNanInt64, HeapNumber::cast(*obj)->value_as_bits());
 }
 
 namespace {

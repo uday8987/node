@@ -1433,6 +1433,7 @@ class RepresentationSelector {
       if (IsLargeBigInt(TypeOf(accumulator))) {
         ConvertInput(node, FrameState::kFrameStateStackInput,
                      UseInfo::AnyTagged());
+        accumulator = node.stack();
       }
       Zone* zone = jsgraph_->zone();
       if (accumulator == jsgraph_->OptimizedOutConstant()) {
@@ -1713,7 +1714,6 @@ class RepresentationSelector {
         ChangeToInt32OverflowOp(node);
       }
     }
-    return;
   }
 
   template <Phase T>
@@ -1737,7 +1737,6 @@ class RepresentationSelector {
     if (lower<T>()) {
       ChangeToPureOp(node, Float64Op(node));
     }
-    return;
   }
 
   template <Phase T>
@@ -1852,7 +1851,6 @@ class RepresentationSelector {
     VisitBinop<T>(node, lhs_use, rhs_use, MachineRepresentation::kFloat64,
                   Type::Number());
     if (lower<T>()) ChangeToPureOp(node, Float64Op(node));
-    return;
   }
 
   // Just assert for Propagate and Retype. Lower specialized below.
@@ -2370,6 +2368,11 @@ class RepresentationSelector {
           if (lower<T>()) ChangeOp(node, Int32Op(node));
           return;
         }
+        if (lhs_type.Is(Type::Boolean()) && rhs_type.Is(Type::Boolean())) {
+          VisitBinop<T>(node, UseInfo::Bool(), MachineRepresentation::kBit);
+          if (lower<T>()) ChangeOp(node, lowering->machine()->Word32Equal());
+          return;
+        }
         // => Float64Cmp
         VisitBinop<T>(node, UseInfo::TruncatingFloat64(kIdentifyZeros),
                       MachineRepresentation::kBit);
@@ -2433,6 +2436,12 @@ class RepresentationSelector {
           VisitBinop<T>(node, UseInfo::TruncatingWord32(),
                         MachineRepresentation::kBit);
           if (lower<T>()) ChangeToPureOp(node, Int32Op(node));
+          return;
+        } else if (lhs_type.Is(Type::Boolean()) &&
+                   rhs_type.Is(Type::Boolean())) {
+          VisitBinop<T>(node, UseInfo::Bool(), MachineRepresentation::kBit);
+          if (lower<T>())
+            ChangeToPureOp(node, lowering->machine()->Word32Equal());
           return;
         }
         // Try to use type feedback.
@@ -3722,6 +3731,7 @@ class RepresentationSelector {
         SetOutput<T>(node, MachineType::PointerRepresentation());
         return;
       }
+#if V8_ENABLE_WEBASSEMBLY
       case IrOpcode::kLoadStackPointer: {
         SetOutput<T>(node, MachineType::PointerRepresentation());
         return;
@@ -3730,6 +3740,7 @@ class RepresentationSelector {
         SetOutput<T>(node, MachineRepresentation::kNone);
         return;
       }
+#endif  // V8_ENABLE_WEBASSEMBLY
       case IrOpcode::kLoadMessage: {
         if (truncation.IsUnused()) return VisitUnused<T>(node);
         VisitUnop<T>(node, UseInfo::Word(), MachineRepresentation::kTagged);
@@ -5517,7 +5528,7 @@ void SimplifiedLowering::DoUnsigned32ToUint8Clamped(Node* node) {
 Node* SimplifiedLowering::ToNumberCode() {
   if (!to_number_code_.is_set()) {
     Callable callable = Builtins::CallableFor(isolate(), Builtin::kToNumber);
-    to_number_code_.set(jsgraph()->HeapConstant(callable.code()));
+    to_number_code_.set(jsgraph()->HeapConstantNoHole(callable.code()));
   }
   return to_number_code_.get();
 }
@@ -5527,7 +5538,7 @@ Node* SimplifiedLowering::ToNumberConvertBigIntCode() {
     Callable callable =
         Builtins::CallableFor(isolate(), Builtin::kToNumberConvertBigInt);
     to_number_convert_big_int_code_.set(
-        jsgraph()->HeapConstant(callable.code()));
+        jsgraph()->HeapConstantNoHole(callable.code()));
   }
   return to_number_convert_big_int_code_.get();
 }
@@ -5535,7 +5546,7 @@ Node* SimplifiedLowering::ToNumberConvertBigIntCode() {
 Node* SimplifiedLowering::ToNumericCode() {
   if (!to_numeric_code_.is_set()) {
     Callable callable = Builtins::CallableFor(isolate(), Builtin::kToNumeric);
-    to_numeric_code_.set(jsgraph()->HeapConstant(callable.code()));
+    to_numeric_code_.set(jsgraph()->HeapConstantNoHole(callable.code()));
   }
   return to_numeric_code_.get();
 }

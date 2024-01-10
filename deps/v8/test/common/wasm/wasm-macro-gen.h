@@ -616,8 +616,9 @@ inline uint16_t ExtractPrefixedOpcodeBytes(WasmOpcode opcode) {
       static_cast<uint8_t>(depth), static_cast<uint8_t>(sourcetype), \
       static_cast<uint8_t>(targettype)
 
-#define WASM_GC_INTERNALIZE(extern) extern, WASM_GC_OP(kExprExternInternalize)
-#define WASM_GC_EXTERNALIZE(ref) ref, WASM_GC_OP(kExprExternExternalize)
+#define WASM_GC_ANY_CONVERT_EXTERN(extern) \
+  extern, WASM_GC_OP(kExprAnyConvertExtern)
+#define WASM_GC_EXTERN_CONVERT_ANY(ref) ref, WASM_GC_OP(kExprExternConvertAny)
 
 #define WASM_ARRAY_NEW(index, default_value, length) \
   default_value, length, WASM_GC_OP(kExprArrayNew), static_cast<uint8_t>(index)
@@ -928,8 +929,8 @@ inline uint16_t ExtractPrefixedOpcodeBytes(WasmOpcode opcode) {
 #define WASM_ATOMICS_STORE_OP(op, x, y, representation) \
   x, y, WASM_ATOMICS_OP(op),                            \
       static_cast<uint8_t>(ElementSizeLog2Of(representation)), ZERO_OFFSET
-#define WASM_ATOMICS_WAIT(op, index, value, timeout, offset) \
-  index, value, timeout, WASM_ATOMICS_OP(op), ZERO_ALIGNMENT, offset
+#define WASM_ATOMICS_WAIT(op, index, value, timeout, alignment, offset) \
+  index, value, timeout, WASM_ATOMICS_OP(op), alignment, offset
 #define WASM_ATOMICS_FENCE WASM_ATOMICS_OP(kExprAtomicFence), ZERO_OFFSET
 
 //------------------------------------------------------------------------------
